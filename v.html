@@ -8,27 +8,36 @@ if(!/^[0-9a-f]{32}$/.test(sid)||!/^[A-Za-z0-9_-]{43}$/.test(key)){say('This link
 if(!window.crypto||!crypto.subtle||!window.fetch||!window.TextDecoder){say('This browser cannot open this link.',true,'Try Chrome, Safari, Edge or Firefox.');return;}
 var RAW='https://raw.githubusercontent.com/'+OWNER+'/'+REPO+'/main/s/'+sid+'.enc';
 var API='https://api.github.com/repos/'+OWNER+'/'+REPO+'/contents/s/'+sid+'.enc';
+/* #1216: a third copy on THIS origin (GitHub Pages serves the repo, .enc
+   included, ~25 s after the push). No CORS, no rate limit, no extra host a
+   phone's DNS filter can block - raw.githubusercontent is on malware
+   blocklists and api.github.com is 60 req/h per IP. */
+var PAGES='s/'+sid+'.enc';
 function b64u(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';var b=atob(s),a=new Uint8Array(b.length);for(var i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return a;}
 function grab(url,opts){return fetch(url,opts).then(function(r){if(r.status===200)return r.arrayBuffer().then(function(b){return{ok:true,buf:b};});return{ok:false,code:r.status};},function(){return{ok:false,code:0};});}
 function settle(ps){return Promise.all(ps.map(function(p){return p.then(function(v){return v;},function(){return{ok:false,code:0};});}));}
 function decrypt(buf){var u=new Uint8Array(buf);if(u.length<4+12+16||String.fromCharCode(u[0],u[1],u[2],u[3])!=='MA5E')return Promise.reject({bad:true});var iv=u.subarray(4,16),ct=u.subarray(16);return crypto.subtle.importKey('raw',b64u(key),'AES-GCM',false,['decrypt']).then(function(k){return crypto.subtle.decrypt({name:'AES-GCM',iv:iv,additionalData:new TextEncoder().encode(sid)},k,ct);}).then(function(pt){return new TextDecoder().decode(pt);},function(){return Promise.reject({bad:true});});}
 var t0=Date.now(),tries=0;
 function go(){tries++;
- settle([grab(RAW,{cache:'no-store'}),grab(API,{headers:{Accept:'application/vnd.github.raw+json'}})]).then(function(rs){
-  var raw=rs[0],api=rs[1];
+ settle([grab(RAW,{cache:'no-store'}),grab(API,{headers:{Accept:'application/vnd.github.raw+json'}}),grab(PAGES+'?_='+Date.now(),{cache:'no-store'})]).then(function(rs){
+  var raw=rs[0],api=rs[1],pg=rs[2];
   /* The contents API is the truth about whether the file still exists - raw
      keeps a deleted file for up to five minutes. A rate-limited or unreachable
      API (403/0) gets no vote. */
   if(api.code===404&&!api.ok){return Promise.reject({gone:true});}
-  var src=api.ok?api.buf:(raw.ok?raw.buf:null);
-  if(!src){return Promise.reject({gone:raw.code===404,net:(raw.code===0&&api.code===0)});}
+  var src=api.ok?api.buf:(raw.ok?raw.buf:(pg.ok?pg.buf:null));
+  if(!src){var codes='raw '+raw.code+' / api '+api.code+' / pages '+pg.code;
+   return Promise.reject({gone:(raw.code===404||pg.code===404)&&api.code!==200,codes:codes});}
   return decrypt(src);
  }).then(function(html){document.open();document.write(html);document.close();},function(e){
   e=e||{};
   if(e.bad){say('This link could not be opened.',true,'The code after the # sign does not match this conversation. Ask for the link again.');return;}
   if(e.gone&&Date.now()-t0<240000){say('This conversation is still being published…',false,'It usually takes a few seconds. Retrying.');setTimeout(go,Math.min(1500+tries*500,5000));return;}
   if(e.gone){say('This link has been switched off.',true,'The person who shared it took it down.');return;}
-  say('Could not reach GitHub to load this conversation.',true,'Check your connection, then reload this page.');
+  /* Nothing answered - keep trying for a minute before giving up, and show
+     which of the three copies failed so a screenshot says what happened. */
+  if(Date.now()-t0<60000){say('Reconnecting to GitHub…',false,'Retrying ('+(e.codes||'')+')');setTimeout(go,Math.min(1500+tries*500,5000));return;}
+  say('Could not reach GitHub to load this conversation.',true,'Check your connection, then reload this page. ('+(e.codes||'')+')');
  });
 }
 go();
