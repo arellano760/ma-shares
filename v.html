@@ -1,0 +1,36 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Shared conversation</title><style>html,body{margin:0;min-height:100%;background:#0b0d10;color:#cfd3d8;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}.w{max-width:520px;margin:22vh auto 0;padding:0 22px;text-align:center}.s{width:22px;height:22px;border:3px solid #2a2f36;border-top-color:#8ab4f8;border-radius:50%;margin:0 auto 16px;animation:r .9s linear infinite}@keyframes r{to{transform:rotate(360deg)}}.e{color:#f0b26b}.d{color:#6b7280;font-size:13px;margin-top:10px}</style></head><body><div class="w"><div class="s" id="s"></div><div id="m">Opening the shared conversation&hellip;</div><div class="d" id="d"></div></div><script>
+(function(){
+var OWNER='arellano760',REPO='ma-shares';
+var m=document.getElementById('m'),sp=document.getElementById('s'),dd=document.getElementById('d');
+function say(t,err,detail){m.textContent=t;dd.textContent=detail||'';if(err){sp.style.display='none';m.className='e';}}
+var h=(location.hash||'').replace(/^#/,'');var p=h.split('.');var sid=p[0]||'',key=p[1]||'';
+if(!/^[0-9a-f]{32}$/.test(sid)||!/^[A-Za-z0-9_-]{43}$/.test(key)){say('This link is incomplete.',true,'Ask for the whole link - it ends in a long code after the # sign.');return;}
+if(!window.crypto||!crypto.subtle||!window.fetch||!window.TextDecoder){say('This browser cannot open this link.',true,'Try Chrome, Safari, Edge or Firefox.');return;}
+var RAW='https://raw.githubusercontent.com/'+OWNER+'/'+REPO+'/main/s/'+sid+'.enc';
+var API='https://api.github.com/repos/'+OWNER+'/'+REPO+'/contents/s/'+sid+'.enc';
+function b64u(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';var b=atob(s),a=new Uint8Array(b.length);for(var i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return a;}
+function grab(url,opts){return fetch(url,opts).then(function(r){if(r.status===200)return r.arrayBuffer().then(function(b){return{ok:true,buf:b};});return{ok:false,code:r.status};},function(){return{ok:false,code:0};});}
+function settle(ps){return Promise.all(ps.map(function(p){return p.then(function(v){return v;},function(){return{ok:false,code:0};});}));}
+function decrypt(buf){var u=new Uint8Array(buf);if(u.length<4+12+16||String.fromCharCode(u[0],u[1],u[2],u[3])!=='MA5E')return Promise.reject({bad:true});var iv=u.subarray(4,16),ct=u.subarray(16);return crypto.subtle.importKey('raw',b64u(key),'AES-GCM',false,['decrypt']).then(function(k){return crypto.subtle.decrypt({name:'AES-GCM',iv:iv,additionalData:new TextEncoder().encode(sid)},k,ct);}).then(function(pt){return new TextDecoder().decode(pt);},function(){return Promise.reject({bad:true});});}
+var t0=Date.now(),tries=0;
+function go(){tries++;
+ settle([grab(RAW,{cache:'no-store'}),grab(API,{headers:{Accept:'application/vnd.github.raw+json'}})]).then(function(rs){
+  var raw=rs[0],api=rs[1];
+  /* The contents API is the truth about whether the file still exists - raw
+     keeps a deleted file for up to five minutes. A rate-limited or unreachable
+     API (403/0) gets no vote. */
+  if(api.code===404&&!api.ok){return Promise.reject({gone:true});}
+  var src=api.ok?api.buf:(raw.ok?raw.buf:null);
+  if(!src){return Promise.reject({gone:raw.code===404,net:(raw.code===0&&api.code===0)});}
+  return decrypt(src);
+ }).then(function(html){document.open();document.write(html);document.close();},function(e){
+  e=e||{};
+  if(e.bad){say('This link could not be opened.',true,'The code after the # sign does not match this conversation. Ask for the link again.');return;}
+  if(e.gone&&Date.now()-t0<240000){say('This conversation is still being published…',false,'It usually takes a few seconds. Retrying.');setTimeout(go,Math.min(1500+tries*500,5000));return;}
+  if(e.gone){say('This link has been switched off.',true,'The person who shared it took it down.');return;}
+  say('Could not reach GitHub to load this conversation.',true,'Check your connection, then reload this page.');
+ });
+}
+go();
+})();
+</script></body></html>
