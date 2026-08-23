@@ -18,6 +18,17 @@ function grab(url,opts){return fetch(url,opts).then(function(r){if(r.status===20
 function settle(ps){return Promise.all(ps.map(function(p){return p.then(function(v){return v;},function(){return{ok:false,code:0};});}));}
 function decrypt(buf){var u=new Uint8Array(buf);if(u.length<4+12+16||String.fromCharCode(u[0],u[1],u[2],u[3])!=='MA5E')return Promise.reject({bad:true});var iv=u.subarray(4,16),ct=u.subarray(16);return crypto.subtle.importKey('raw',b64u(key),'AES-GCM',false,['decrypt']).then(function(k){return crypto.subtle.decrypt({name:'AES-GCM',iv:iv,additionalData:new TextEncoder().encode(sid)},k,ct);}).then(function(pt){return new TextDecoder().decode(pt);},function(){return Promise.reject({bad:true});});}
 var t0=Date.now(),tries=0;
+/* #249: once the page is in, its Ukrainian (if the dashboard has made it yet)
+   sits beside it as s/<sid>.uk.enc - same key, same layout. Fetched AFTER the
+   page so it never delays it; two quiet retries cover a link opened within
+   seconds of being made. The page shows its Translate? bar only when this
+   lands. */
+function ukGo(n){n=n||0;var U=function(u){return u.replace(/\.enc(\?|$)/,'.uk.enc$1');};
+ settle([grab(U(RAW),{cache:'no-store'}),grab(U(API)+'?_='+Date.now(),{headers:{Accept:'application/vnd.github.raw+json'}}),grab(U(PAGES)+'?_='+Date.now(),{cache:'no-store'})]).then(function(rs){
+  var src=rs[1].ok?rs[1].buf:(rs[0].ok?rs[0].buf:(rs[2].ok?rs[2].buf:null));
+  if(!src){if(n<2)setTimeout(function(){ukGo(n+1);},15000);return;}
+  return decrypt(src).then(function(txt){var map=JSON.parse(txt);window.__MA5_UK=map;if(window.__ma5UkReady)window.__ma5UkReady(map);});
+ }).catch(function(){});}
 function go(){tries++;
  settle([grab(RAW,{cache:'no-store'}),grab(API+'?_='+Date.now(),{headers:{Accept:'application/vnd.github.raw+json'}}),grab(PAGES+'?_='+Date.now(),{cache:'no-store'})]).then(function(rs){
   var raw=rs[0],api=rs[1],pg=rs[2];
@@ -32,7 +43,7 @@ function go(){tries++;
   if(!src){var codes='raw '+raw.code+' / api '+api.code+' / pages '+pg.code;
    return Promise.reject({gone:(raw.code===404||pg.code===404)&&api.code!==200,codes:codes});}
   return decrypt(src);
- }).then(function(html){document.open();document.write(html);document.close();},function(e){
+ }).then(function(html){document.open();document.write(html);document.close();setTimeout(ukGo,0);},function(e){
   e=e||{};
   if(e.bad){say('This link could not be opened.',true,'The code after the # sign does not match this conversation. Ask for the link again.');return;}
   if(e.gone&&Date.now()-t0<240000){say('This conversation is still being published…',false,'It usually takes a few seconds. Retrying.');setTimeout(go,Math.min(1500+tries*500,5000));return;}
