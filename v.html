@@ -19,13 +19,16 @@ function settle(ps){return Promise.all(ps.map(function(p){return p.then(function
 function decrypt(buf){var u=new Uint8Array(buf);if(u.length<4+12+16||String.fromCharCode(u[0],u[1],u[2],u[3])!=='MA5E')return Promise.reject({bad:true});var iv=u.subarray(4,16),ct=u.subarray(16);return crypto.subtle.importKey('raw',b64u(key),'AES-GCM',false,['decrypt']).then(function(k){return crypto.subtle.decrypt({name:'AES-GCM',iv:iv,additionalData:new TextEncoder().encode(sid)},k,ct);}).then(function(pt){return new TextDecoder().decode(pt);},function(){return Promise.reject({bad:true});});}
 var t0=Date.now(),tries=0;
 function go(){tries++;
- settle([grab(RAW,{cache:'no-store'}),grab(API,{headers:{Accept:'application/vnd.github.raw+json'}}),grab(PAGES+'?_='+Date.now(),{cache:'no-store'})]).then(function(rs){
+ settle([grab(RAW,{cache:'no-store'}),grab(API+'?_='+Date.now(),{headers:{Accept:'application/vnd.github.raw+json'}}),grab(PAGES+'?_='+Date.now(),{cache:'no-store'})]).then(function(rs){
   var raw=rs[0],api=rs[1],pg=rs[2];
   /* The contents API is the truth about whether the file still exists - raw
      keeps a deleted file for up to five minutes. A rate-limited or unreachable
      API (403/0) gets no vote. */
-  if(api.code===404&&!api.ok){return Promise.reject({gone:true});}
+  /* #244: ...but a 404 the API cached from a try made BEFORE the file landed
+     kept a live share on "still being published" for a minute. Any copy that
+     answers 200 wins; the API's 404 only counts when nobody has the bytes. */
   var src=api.ok?api.buf:(raw.ok?raw.buf:(pg.ok?pg.buf:null));
+  if(!src&&api.code===404){return Promise.reject({gone:true});}
   if(!src){var codes='raw '+raw.code+' / api '+api.code+' / pages '+pg.code;
    return Promise.reject({gone:(raw.code===404||pg.code===404)&&api.code!==200,codes:codes});}
   return decrypt(src);
